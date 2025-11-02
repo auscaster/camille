@@ -1,0 +1,365 @@
+openapi: 3.0.3
+info:
+  title: Camille API
+  version: 0.1.0
+  description: |
+    API for scanning domains, enriching identity, and returning an explainable
+    risk label with evidence. OpenAPI-first; server stubs generated with oapi-codegen (chi).
+servers:
+  - url: http://localhost:8080
+paths:
+  /healthz:
+    get:
+      tags: [meta]
+      summary: Liveness probe
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /scan:
+    post:
+      tags: [scan]
+      summary: Enqueue a scan for a URL/domain
+      description: Normalizes the origin (eTLD+1), idempotently enqueues a scan job, and returns a scan id.
+      parameters:
+        - in: query
+          name: wait
+          description: If true, block until the scan finishes (testing/dev only)
+          schema:
+            type: boolean
+            default: false
+        - in: query
+          name: timeout
+          description: Max seconds to wait when wait=true
+          schema:
+            type: integer
+            minimum: 1
+            default: 30
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScanCreateRequest'
+      responses:
+        '200':
+          description: Completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanResponse'
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanAcceptedResponse'
+
+  /scans/{id}:
+    get:
+      tags: [scan]
+      summary: Get scan status and partial results
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Scan status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanResponse'
+        '404':
+          description: Not found
+
+  /profiles/{domain}:
+    get:
+      tags: [profiles]
+      summary: Get latest profile for a domain
+      parameters:
+        - name: domain
+          in: path
+          required: true
+          description: Registrable domain (eTLD+1), e.g., example.com
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+        '404':
+          description: Not found
+
+  /companies/{opencorporates_id}:
+    get:
+      tags: [companies]
+      summary: Get normalized identity/ownership snapshot for an OpenCorporates ID
+      parameters:
+        - name: opencorporates_id
+          in: path
+          required: true
+          description: Jurisdiction code and company number, e.g., gb/01234567
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Company identity snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompanyIdentity'
+        '404':
+          description: Not found
+
+components:
+  schemas:
+    ScanCreateRequest:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          format: uri
+          example: https://example.com
+
+    ScanAcceptedResponse:
+      type: object
+      required: [scan_id]
+      properties:
+        scan_id:
+          type: string
+          example: 01JABCD2EF3GH4JK56MN78PQRS
+        status_url:
+          type: string
+          format: uri
+          example: http://localhost:8080/scans/01JABCD2EF3GH4JK56MN78PQRS
+
+    ScanStatus:
+      type: string
+      enum: [queued, running, completed, failed]
+
+    ScanResponse:
+      type: object
+      required: [id, status]
+      properties:
+        id:
+          type: string
+        status:
+          $ref: '#/components/schemas/ScanStatus'
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        progress:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          example: 0.4
+        profile:
+          $ref: '#/components/schemas/Profile'
+        errors:
+          type: array
+          items:
+            type: string
+
+    Profile:
+      type: object
+      required: [domain, overall, scores]
+      properties:
+        domain:
+          type: string
+          example: example.com
+        overall:
+          type: integer
+          minimum: 0
+          maximum: 100
+          example: 78
+        scores:
+          $ref: '#/components/schemas/Scores'
+        badges:
+          type: array
+          items:
+            type: string
+          example: ["HSTS Preloaded", "security.txt present"]
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/Issue'
+        signals:
+          type: array
+          description: Optional normalized signals powering the score
+          items:
+            $ref: '#/components/schemas/Signal'
+
+    Scores:
+      type: object
+      required: [privacy, security, governance, esg]
+      properties:
+        privacy:
+          type: integer
+          minimum: 0
+          maximum: 100
+          example: 72
+        security:
+          type: integer
+          minimum: 0
+          maximum: 100
+          example: 85
+        governance:
+          type: integer
+          minimum: 0
+          maximum: 100
+          example: 80
+        esg:
+          type: integer
+          minimum: 0
+          maximum: 100
+          example: 60
+
+    Issue:
+      type: object
+      required: [id, severity, summary]
+      properties:
+        id:
+          type: string
+          example: policy-data-sale
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+          example: high
+        summary:
+          type: string
+          example: Sells/shares data with third parties
+        evidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvidenceRef'
+
+    EvidenceRef:
+      type: object
+      required: [source]
+      properties:
+        source:
+          type: string
+          example: tosdr
+        url:
+          type: string
+          format: uri
+          nullable: true
+        detail:
+          type: string
+          nullable: true
+
+    Signal:
+      type: object
+      description: Normalized evidence-backed signal used for scoring
+      required: [code, value, source]
+      properties:
+        code:
+          type: string
+          example: http.hsts.preloaded
+        value:
+          oneOf:
+            - type: boolean
+            - type: number
+            - type: string
+        severity:
+          type: string
+          enum: [info, low, medium, high, critical]
+          example: info
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          example: 0.9
+        source:
+          type: string
+          example: observatory
+        retrieved_at:
+          type: string
+          format: date-time
+
+    CompanyIdentity:
+      type: object
+      required: [opencorporates_id, name]
+      properties:
+        opencorporates_id:
+          type: string
+          example: gb/01234567
+        name:
+          type: string
+          example: Example Ltd.
+        jurisdiction:
+          type: string
+          example: GB
+        company_number:
+          type: string
+          example: 01234567
+        lei:
+          type: string
+          nullable: true
+        website:
+          type: string
+          nullable: true
+        officers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Officer'
+        ownership:
+          type: object
+          description: Raw ownership facts (BODS-like)
+          additionalProperties: true
+        sanctions_hits:
+          type: array
+          items:
+            $ref: '#/components/schemas/SanctionHit'
+
+    Officer:
+      type: object
+      properties:
+        name:
+          type: string
+        role:
+          type: string
+        start_date:
+          type: string
+          format: date
+          nullable: true
+        end_date:
+          type: string
+          format: date
+          nullable: true
+
+    SanctionHit:
+      type: object
+      properties:
+        source:
+          type: string
+          example: opensanctions
+        id:
+          type: string
+        name:
+          type: string
+        score:
+          type: number
+          description: Match score from the provider
+          example: 0.92

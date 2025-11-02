@@ -1,0 +1,29 @@
+# Go build artifacts
+bin/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go modules
+go.sum
+
+# IDE/editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Generated code
+internal/api/*.gen.go
+internal/api/api.gen.go
+
+# OS
+.DS_Store
+
+# Local environment
+.env

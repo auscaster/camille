@@ -1,0 +1,10 @@
+package: api
+generate:
+  - types
+  - chi-server
+  - strict-server
+output-options:
+  skip-prune: true
+compatibility:
+  # produce pointers for optional fields
+  use-pointers-for-optional: true
